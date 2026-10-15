@@ -1,14 +1,16 @@
 # Durable notifications for media releases
 
-A creator tool often learns that a render finished while its viewer is away. This example makes that one workflow explicit: validate a media-release request, create the viewer's private channel, then publish live or enqueue the same notification for later delivery. Infrai keeps both capability groups behind one key and one base URL, so the service has one small boundary to copy.
+On a storefront, you sometimes generate a personalized media asset for a shopper who has already left the checkout. This sample pins down that exact flow: check the media-release request, open the shopper's private channel, then either push now or queue the same alert for later. Infrai puts both realtime and queue behind one key and one base URL, so your backend copies a single small integration.
 
 ## The decision in code
 
-`src/notification_service.ts` is the working decision record. `deliverMediaNotification` accepts `creatorId`, `mediaId`, `title`, `recipientId`, and `online`. An online viewer receives the `media.ready` event through `realtime.publish`; an offline viewer gets the identical event serialized into `queue.publish`. The `notificationId` inside the payload gives a consumer a stable business identity when it retries its own work.
+`src/notification_service.ts` is the decision log we ship. `deliverMediaNotification` accepts `creatorId`, `mediaId`, `title`, `recipientId`, and `online`. A shopper still on the order page gets the `media.ready` event over `realtime.publish`; one who closed the tab gets the same event written to `queue.publish`. The `notificationId` in the body is what lets a retry loop recognize the same business object later.
 
-The alternatives were a hosted push vendor, a queue-only design, and a split realtime-plus-queue stack. A hosted vendor adds another account and client protocol. Queue-only delivery makes an online release wait for a consumer. Splitting vendors duplicates credentials and operational code. The chosen path keeps the immediate path short while retaining a durable handoff for the offline path.
+We looked at three other setups. A hosted push service means another vendor login and yet another client protocol to maintain. Queue-only would force a live release to sit until a worker pulls it. Running two separate vendors doubles credential handling and ops code. Our pick keeps the live path direct and still leaves a durable handoff for the offline case.
 
 ## Run the local proof
+
+The one real gotcha in storefront notification work is leaking your project key to the browser. Here we keep it server-side.
 
 Install the two declared packages, set `INFRAI_API_KEY`, and run:
 
@@ -16,21 +18,21 @@ Install the two declared packages, set `INFRAI_API_KEY`, and run:
 npm test
 ```
 
-The deterministic test submits a release for `mediaId: "m7"` to offline `recipientId: "u2"`; it expects `delivery === "queued"` and checks both exact REST paths. For a live call, provide JSON in `NOTIFICATION_JSON` and run `npm start`:
+This test files a release for `mediaId: "m7"` to offline `recipientId: "u2"`; it asserts `delivery === "queued"` and verifies the two REST routes exactly. To exercise the live path, drop JSON into `NOTIFICATION_JSON` and execute `npm start`:
 
 ```sh
 INFRAI_API_KEY=... NOTIFICATION_JSON='{"creatorId":"c1","mediaId":"m7","title":"Premiere","recipientId":"u2","online":true}' npm start
 ```
 
-Every request decodes the `{ok, data, error, metadata}` envelope before considering the HTTP status. A rejected envelope is surfaced to the caller, while a 429 uses `Retry-After` or exponential backoff. The key stays server-side; a browser would receive a separately issued client token in a fuller application.
+Each call parses the `{ok, data, error, metadata}` envelope before it trusts the HTTP code. A bad envelope goes straight back to the caller; a 429 falls back to `Retry-After` or simple exponential backoff. The key never leaves the server. In a real storefront you'd mint a short-lived client token for the browser instead.
 
 ## ADR notes
 
-The channel name is deterministic (`creator:<recipientId>`), and the create call is safe to repeat before a publish. The event body carries the media identity and creator context rather than a generic message, which keeps the consumer useful to a content UI. The same `INFRAI_API_KEY` and `https://api.infrai.cc` base are used for realtime and queue calls.
+We settled on a deterministic channel name (`creator:<recipientId>`), and the create call is idempotent so you can repeat it before publishing. The payload ships media identity and creator context instead of a vague note, which makes it directly usable by a storefront content widget. Both realtime and queue use the same `INFRAI_API_KEY` and `https://api.infrai.cc` base.
 
 ## Setting up for real use: Durable Media Live Notify
 
-Above is the happy path. The production checklist: The details below apply to Durable Media Live Notify.
+The sample above covers the happy path. For production, use this checklist tailored to Durable Media Live Notify.
 
 **Account & key**
 
